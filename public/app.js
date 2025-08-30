@@ -24,9 +24,41 @@
       confirmGive: "Confirm & Give",
       sheet: { title:"Secure Payment", fund:"Fund", gift:"Gift", total:"Total" },
       toastThanks: "Gift received. Thank you!"
+    },
+    rw: {
+      scripture: "“Ndabaha itegeko rishya: mukundane. Nk'uko nabakunze, namwe mukundane. Ibyo ni byo bose bazamenyeraho ko muri abigishwa banjye, nimukundana.” — Yohana 13:34–35",
+      amountLabel: "Umubare",
+      amountPlaceholder: "Injiza umubare",
+      amountHelp: "Ntoya ni $1.00. (Inama: koresha udupfundi cyangwa andika umubare.)",
+      amountError: "Injiza umubare wemewe hagati ya $1 na $10,000.",
+      fundLabel: "Ikigega",
+      tithe: "Icyacumi", offering: "Ituro", missions: "Ivugabutumwa", building: "Ikigega cy'ubwubatsi",
+      name: "Izina ryawe (bikenewe rimwe)",
+      email: "Imeli (bikenewe rimwe)",
+      giveNow: "Tanga Ubu",
+      cancel: "Hagarika",
+      confirmGive: "Emeza utange",
+      sheet: { title:"Kwishyura kwizewe", fund:"Ikigega", gift:"Ituro", total:"Igiteranyo" },
+      toastThanks: "Ituro ryakiriwe. Murakoze!"
+    },
+    fr: {
+      scripture: "« Je vous donne un commandement nouveau : aimez-vous les uns les autres ; comme je vous ai aimés, vous aussi aimez-vous les uns les autres. À ceci tous connaîtront que vous êtes mes disciples, si vous avez de l’amour les uns pour les autres. » — Jean 13:34–35",
+      amountLabel: "Montant",
+      amountPlaceholder: "Saisir le montant",
+      amountHelp: "Minimum 1,00 $. (Astuce : utilisez les boutons ou saisissez un montant.)",
+      amountError: "Entrez un montant valide entre 1 $ et 10 000 $.",
+      fundLabel: "Fonds",
+      tithe: "Dîme", offering: "Offrande", missions: "Missions", building: "Fonds de construction",
+      name: "Votre nom (requis une fois)",
+      email: "E-mail (requis une fois)",
+      giveNow: "Donner maintenant",
+      cancel: "Annuler",
+      confirmGive: "Confirmer et donner",
+      sheet: { title:"Paiement sécurisé", fund:"Fonds", gift:"Don", total:"Total" },
+      toastThanks: "Don reçu. Merci !"
     }
   };
-  const supportedLangs = ['en']; // (trimmed for brevity)
+  const supportedLangs = ['en','rw','fr'];
   const STATE = { lang: 'en' };
 
   // ---------- Local storage ----------
