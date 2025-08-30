@@ -7,17 +7,6 @@
   const DEBUG = new URLSearchParams(location.search).has('debug');
   const dlog = (...a)=> { if (DEBUG) console.log('[HOLI]', ...a); };
 
-  // ---- Feature flags (force-enable wallets) ----
-  const FEATURES = {
-    wallets: true,
-    apple: true,
-    google: true,
-    cashApp: true,
-    afterpay: true,
-    giftCard: false, // flip true if you enable Square Gift Cards
-    ach: true
-  };
-
   // ---------- i18n ----------
   const i18n = {
     en: {
@@ -110,26 +99,11 @@
     requestAnimationFrame(tick);
   }
 
-  // ---------- i18n helpers ----------
+  // ---------- i18n ----------
   function t(key){
     const langMap = i18n[STATE.lang] || i18n.en;
     return key.split('.').reduce((o,k)=> (o && o[k] != null) ? o[k] : null, langMap) ?? key;
   }
-
-  function updateFundOptions(){
-    const sel = document.getElementById('fund');
-    if (!sel) return;
-    const prev = sel.value;
-    Array.from(sel.options).forEach(opt=>{
-      const v = (opt.value || '').trim(); // tithe/offering/missions/building
-      if (v && i18n[STATE.lang] && i18n[STATE.lang][v]) {
-        opt.textContent = i18n[STATE.lang][v];
-      }
-    });
-    // keep the selected value
-    sel.value = prev;
-  }
-
   function applyI18n(){
     document.querySelectorAll('[data-i18n]').forEach(el=>{
       const k = el.getAttribute('data-i18n'); const val = t(k); if (val) el.textContent = val;
@@ -141,10 +115,7 @@
         const val = t(key); if (val) el.setAttribute(attr.trim(), val);
       });
     });
-    // ensure the fund select reflects current language
-    updateFundOptions();
   }
-
   function initI18n(){
     let savedLang = LS.get('holi.lang');
     if (!supportedLangs.includes(savedLang)) {
@@ -164,18 +135,6 @@
       });
     }
     applyI18n();
-  }
-
-  // ---------- Small wallet diagnostic helper ----------
-  function walletNote(afterElOrSelector, msg){
-    try{
-      const el = typeof afterElOrSelector === 'string' ? document.querySelector(afterElOrSelector) : afterElOrSelector;
-      if (!el || !msg) return;
-      const p = document.createElement('p');
-      p.className = 'help mt-2';
-      p.textContent = msg;
-      el.insertAdjacentElement('afterend', p);
-    }catch{}
   }
 
   // ---------- Giving ----------
@@ -249,7 +208,6 @@
 
       giveBtn.disabled = invalid;
 
-      // Use localized label directly from the <option> we keep synced via updateFundOptions()
       const fundText = fundSel.options[fundSel.selectedIndex].textContent.trim();
       summary.textContent = (!invalid && amt)
         ? `${fmtUSD(amt)} → ${fundText}. ${i18n[STATE.lang].sheet.total}: ${fmtUSD(amt)}.`
@@ -372,14 +330,26 @@
   }
 
   async function ensurePayments(){
-    if (!window.Square){ showPayError('Square SDK not loaded.'); return null; }
+    if (!window.Square){
+      showPayError('Square SDK not loaded.');
+      return null;
+    }
     if (window.__holi_sq_payments) return window.__holi_sq_payments;
 
     const { appId, locationId } = getSquareCreds();
-    if (!appId || !locationId){ showPayError('Missing Square App ID or Location ID in meta tags.'); return null; }
+    if (!appId || !locationId){
+      showPayError('Missing Square App ID or Location ID in meta tags.');
+      return null;
+    }
 
     try{
       window.__holi_sq_payments = await window.Square.payments(appId, locationId);
+      // tiny warning if sandbox lib is used in prod
+      try{
+        const src = Array.from(document.scripts).find(s=>/squarecdn\.com/.test(s.src))?.src || '';
+        if (!/sandbox\.web\.squarecdn\.com/.test(src)) dlog('Using PRODUCTION Square SDK');
+        else dlog('Using SANDBOX Square SDK');
+      }catch{}
       return window.__holi_sq_payments;
     }catch(err){
       showPayError(err?.message || 'Square payments init failed.');
@@ -387,20 +357,19 @@
     }
   }
 
-  function paymentRequestFor(amount){
-    const amtStr = (amount ?? 0).toFixed(2);
-    return {
-      countryCode: 'US',
-      currencyCode: 'USD',
-      total: { amount: amtStr, label: 'HOLI Gift' },
-      requestBillingContact: true
-    };
-  }
-
+  // NOTE: Wallets require a Square PaymentRequest object created via payments.paymentRequest(...)
   async function initAndMountPayments(amount){
     const payments = await ensurePayments();
     if (!payments) throw new Error("Square not initialized");
-    const pr = ()=> paymentRequestFor(amount);
+
+    const amountStr = (amount ?? 0).toFixed(2);
+    const paymentRequest = payments.paymentRequest({
+      countryCode: 'US',
+      currencyCode: 'USD',
+      total: { amount: amountStr, label: 'HOLI Gift' },
+      requestBillingContact: true
+      // requestShippingContact: true, // uncomment if you need shipping info (e.g., Afterpay shipping flows)
+    });
 
     // Containers
     const cardContainer = document.getElementById('card-container');
@@ -424,132 +393,111 @@
     dlog('card attached');
 
     // ---- Apple Pay ----
-    if (FEATURES.wallets && FEATURES.apple) {
-      try {
-        const ap = await payments.applePay(pr());
-        const can = await ap.canMakePayment();
-        dlog('applePay.canMakePayment:', can);
-        if (can && appleBtn) {
-          SQ.applePay = ap;
-          appleBtn.classList.remove('hidden');
-          appleBtn.onclick = async (e)=>{
-            e.preventDefault();
-            try{
-              const res = await SQ.applePay.tokenize();
-              if (res?.status === 'OK') await completePayment(res.token, amount);
-              else throw new Error(res?.errors?.[0]?.message || 'Apple Pay error');
-            }catch(err){ showPayError(err?.message || 'Apple Pay error'); }
-          };
-        } else {
-          appleBtn && appleBtn.classList.add('hidden');
-          walletNote('#apple-pay-button', 'Apple Pay not available: use Safari on a device with Wallet set up, domain verified, and production App/Location IDs.');
-        }
-      } catch (e) {
-        dlog('applePay init error:', e);
-        appleBtn && appleBtn.classList.add('hidden');
-        walletNote('#apple-pay-button', `Apple Pay error: ${e?.message || e}`);
-      }
+    try {
+      const ap = await payments.applePay(paymentRequest);
+      const can = await ap.canMakePayment();
+      dlog('applePay.canMakePayment:', can);
+      if (can && appleBtn) {
+        SQ.applePay = ap;
+        appleBtn.classList.remove('hidden');
+        appleBtn.onclick = async (e)=>{
+          e.preventDefault();
+          try{
+            const res = await SQ.applePay.tokenize();
+            if (res?.status === 'OK') await completePayment(res.token, amount);
+            else showPayError(res?.errors?.[0]?.message || 'Apple Pay error');
+          }catch(err){ showPayError(err?.message || 'Apple Pay error'); }
+        };
+      } else { appleBtn && appleBtn.classList.add('hidden'); }
+    } catch (e) {
+      dlog('applePay init error:', e?.message || e);
+      appleBtn && appleBtn.classList.add('hidden');
     }
 
     // ---- Google Pay ----
-    if (FEATURES.wallets && FEATURES.google) {
-      try {
-        const gp = await payments.googlePay(pr());
-        const can = await gp.canMakePayment();
-        dlog('googlePay.canMakePayment:', can);
-        if (can) {
-          SQ.googlePay = gp;
-          await gp.attach('#google-pay-button');
-          gpayEl && gpayEl.classList.remove('hidden');
-          gp.addEventListener('ontokenization', async (ev)=>{
-            try{
-              const { tokenResult, error } = ev.detail || {};
-              if (error) throw new Error(error?.message || 'Google Pay error');
-              if (tokenResult?.status === 'OK') await completePayment(tokenResult.token, amount);
-              else throw new Error('Google Pay tokenization failed');
-            }catch(err){ showPayError(err?.message || 'Google Pay error'); }
-          });
-        } else {
-          gpayEl && gpayEl.classList.add('hidden');
-          walletNote('#google-pay-button', 'Google Pay not available: use Chrome on Android, ensure Google Pay is set up and prod IDs are used.');
-        }
-      } catch (e) {
-        dlog('googlePay init error:', e);
-        gpayEl && gpayEl.classList.add('hidden');
-        walletNote('#google-pay-button', `Google Pay error: ${e?.message || e}`);
-      }
+    try {
+      const gp = await payments.googlePay(paymentRequest);
+      const can = await gp.canMakePayment();
+      dlog('googlePay.canMakePayment:', can);
+      if (can) {
+        SQ.googlePay = gp;
+        await gp.attach('#google-pay-button');
+        gpayEl && gpayEl.classList.remove('hidden');
+        // Call tokenize on click of the attached element
+        gpayEl.addEventListener('click', async ()=>{
+          try{
+            const tokenResult = await gp.tokenize();
+            if (tokenResult?.status === 'OK') await completePayment(tokenResult.token, amount);
+            else showPayError(tokenResult?.errors?.[0]?.message || 'Google Pay error');
+          }catch(err){ showPayError(err?.message || 'Google Pay error'); }
+        }, { once:false });
+      } else { gpayEl && gpayEl.classList.add('hidden'); }
+    } catch (e) {
+      dlog('googlePay init error:', e?.message || e);
+      gpayEl && gpayEl.classList.add('hidden');
     }
 
     // ---- Cash App Pay ----
-    if (FEATURES.wallets && FEATURES.cashApp) {
-      try {
-        const cap = await payments.cashAppPay(pr(), { redirectURL: location.origin + location.pathname });
-        await cap.attach('#cash-app-pay-button');
-        SQ.cashAppPay = cap;
-        cashAppEl && cashAppEl.classList.remove('hidden');
-        cap.addEventListener('ontokenization', async (ev)=>{
-          const { tokenResult, error } = ev.detail || {};
-          if (error) return showPayError(error?.message || 'Cash App Pay error');
-          if (tokenResult?.status === 'OK') await completePayment(tokenResult.token, amount);
-          else showPayError('Cash App Pay tokenization failed');
-        });
-        dlog('cashAppPay attached');
-      } catch (e) {
-        dlog('cashAppPay init error:', e);
-        cashAppEl && cashAppEl.classList.add('hidden');
-        walletNote('#cash-app-pay-button', `Cash App Pay unavailable: ${e?.message || e} (Requires US merchant, enabled in Square, HTTPS).`);
-      }
+    try {
+      const cap = await payments.cashAppPay(paymentRequest, { redirectURL: location.origin + location.pathname });
+      await cap.attach('#cash-app-pay-button');
+      SQ.cashAppPay = cap;
+      cashAppEl && cashAppEl.classList.remove('hidden');
+      cap.addEventListener('ontokenization', async (ev)=>{
+        const { tokenResult, error } = ev.detail || {};
+        if (error) return showPayError(error?.message || 'Cash App Pay error');
+        if (tokenResult?.status === 'OK') await completePayment(tokenResult.token, amount);
+      });
+      dlog('cashAppPay attached');
+    } catch (e) {
+      dlog('cashAppPay init error:', e?.message || e);
+      cashAppEl && cashAppEl.classList.add('hidden');
     }
 
     // ---- Afterpay/Clearpay ----
-    if (FEATURES.wallets && FEATURES.afterpay) {
-      try{
-        const apcp = await payments.afterpayClearpay(pr());
-        await apcp.attach('#afterpay-button');
-        SQ.afterpay = apcp;
-        afterpayEl && afterpayEl.classList.remove('hidden');
-        afterpayEl?.addEventListener('click', async (e)=>{
-          e.preventDefault();
-          try{
-            const res = await apcp.tokenize();
-            if (res?.status === 'OK') await completePayment(res.token, amount);
-            else showPayError(res?.errors?.[0]?.message || 'Afterpay/Clearpay error');
-          }catch(err){ showPayError(err?.message || 'Afterpay/Clearpay error'); }
-        });
-        dlog('afterpay attached');
-      } catch (e) {
-        dlog('afterpay init error:', e);
-        afterpayEl && afterpayEl.classList.add('hidden');
-        walletNote('#afterpay-button', `Afterpay/Clearpay unavailable or amount not in allowed range: ${e?.message || e}.`);
-      }
+    try{
+      const apcp = await payments.afterpayClearpay(paymentRequest);
+      await apcp.attach('#afterpay-button');
+      SQ.afterpay = apcp;
+      afterpayEl && afterpayEl.classList.remove('hidden');
+      afterpayEl?.addEventListener('click', async (e)=>{
+        e.preventDefault();
+        try{
+          const res = await apcp.tokenize();
+          if (res?.status === 'OK') await completePayment(res.token, amount);
+          else showPayError(res?.errors?.[0]?.message || 'Afterpay/Clearpay error');
+        }catch(err){ showPayError(err?.message || 'Afterpay/Clearpay error'); }
+      }, { once:false });
+      dlog('afterpay attached');
+    } catch (e) {
+      dlog('afterpay init error:', e?.message || e);
+      afterpayEl && afterpayEl.classList.add('hidden');
     }
 
     // ---- ACH (Bank) ----
-    if (FEATURES.ach) {
-      try {
-        SQ.ach = await payments.ach({ redirectURI: location.origin + location.pathname, transactionId: cryptoRandom() });
-        achBtn && achBtn.classList.remove('hidden');
-        achBtn && (achBtn.onclick = async (e)=>{
-          e.preventDefault();
-          try{
-            SQ.ach.addEventListener('ontokenization', async (ev)=>{
-              const { tokenResult, error } = ev.detail || {};
-              if (error) return showPayError(String(error));
-              if (tokenResult?.status === 'OK') await completePayment(tokenResult.token, amount);
-            });
-            await SQ.ach.tokenize({
-              accountHolderName: (document.getElementById('name')?.value || 'Donor').trim(),
-              intent: 'CHARGE',
-              amount: amount.toFixed(2),
-              currency: 'USD'
-            });
-          }catch(err){ showPayError(err?.message || 'ACH error'); }
-        });
-        dlog('ach ready');
-      } catch (e) {
-        dlog('ach init error:', e);
-        achBtn && achBtn.classList.add('hidden');
-      }
+    try {
+      SQ.ach = await payments.ach({ redirectURI: location.origin + location.pathname, transactionId: cryptoRandom() });
+      achBtn && achBtn.classList.remove('hidden');
+      achBtn && (achBtn.onclick = async (e)=>{
+        e.preventDefault();
+        try{
+          SQ.ach.addEventListener('ontokenization', async (ev)=>{
+            const { tokenResult, error } = ev.detail || {};
+            if (error) return showPayError(String(error));
+            if (tokenResult?.status === 'OK') await completePayment(tokenResult.token, amount);
+          }, { once:true });
+          await SQ.ach.tokenize({
+            accountHolderName: (document.getElementById('name')?.value || 'Donor').trim(),
+            intent: 'CHARGE',
+            amount: amountStr,
+            currency: 'USD'
+          });
+        }catch(err){ showPayError(err?.message || 'ACH error'); }
+      });
+      dlog('ach ready');
+    } catch (e) {
+      dlog('ach init error:', e?.message || e);
+      achBtn && achBtn.classList.add('hidden');
     }
 
     // Wallet availability badge
