@@ -9,6 +9,7 @@
   "dependencies": {
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
-    "square": "^38.0.0"
+    "square": "^38.0.0",
+    "validator": "^13.15.15"
   }
 }
